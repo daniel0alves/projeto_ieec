@@ -1,0 +1,20 @@
+#!/usr/bin/env zsh
+# Usage: ./gpush.zsh "your commit message"
+# If no message is given, you'll be prompted for one.
+
+set -e
+
+message="$*"
+
+if [[ -z "$message" ]]; then
+  read "message?Commit message: "
+fi
+
+if [[ -z "$message" ]]; then
+  echo "Aborted: commit message is empty." >&2
+  exit 1
+fi
+
+git add .
+git commit -m "$message"
+git push

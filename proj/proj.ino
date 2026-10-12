@@ -23,7 +23,7 @@
 #include <MFRC522.h>
 #include <Servo.h>
 
-#define RST_PIN 9   // RC522 RST
+#define RST_PIN 11   // RC522 RST
 #define SS_PIN 10   // RC522 SDA (SS)
 
 Servo myservo;
