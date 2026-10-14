@@ -29,7 +29,10 @@
 Servo myservo;
 MFRC522 rfid(SS_PIN, RST_PIN);
 
-const byte AUTHORIZED_UID[4] = {0x17, 0x83, 0xD1, 0x31};
+const byte AUTHORIZED_UID[][4] = {
+  {0x17, 0x83, 0xD1, 0x31},
+  {0x37, 0x0C, 0xD0, 0x31},
+  };
 
 void setup() {
   Serial.begin(9600);
