@@ -48,12 +48,20 @@ void setup() {
   Serial.println("RC522 RFID Reader Initialized");
 }
 
+bool aberto = false;  // pôr fora do loop, junto às outras variáveis
+
 void loop() {
   if (card_check()) {
-    Serial.println("Access granted");
-    myservo.write(90);
-    delay(3000);
-    myservo.write(0);
+    if (aberto == false) {
+      Serial.println("Access granted - a abrir");
+      myservo.write(90);
+      aberto = true;
+    } else {
+      Serial.println("A fechar");
+      myservo.write(0);
+      aberto = false;
+    }
+    delay(1000);  // evita ler o mesmo cartão duas vezes seguidas
   }
 }
 
