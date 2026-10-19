@@ -31,10 +31,12 @@ const int CONTRASTE = 90;    // valor fixo do contraste (0 a 255), em vez do pot
 #define ENDERECO 8           // endereço I2C deste Arduino
 
 volatile char codigo = 0;    // letra recebida do Arduino 1 (0 = nada de novo)
+volatile bool tiltDisparou = false;  // o tilt abanou desde a última pergunta do Arduino 1
 bool aberto = false;         // guarda se o cofre está aberto ou fechado
 
 // Protótipos: num .cpp as funções têm de ser declaradas antes de serem usadas.
 void receberDados(int quantos);
+void enviarTilt();
 void mensagem(String linha1, String linha2);
 void mostrarEstado();
 void alarme(String motivo);
@@ -44,8 +46,13 @@ void setup() {
 
   Wire.begin(ENDERECO);           // com número = este Arduino é o "escravo" com o endereço 8
   Wire.onReceive(receberDados);   // quando chegar uma mensagem, corre a função receberDados
+  Wire.onRequest(enviarTilt);     // quando o Arduino 1 perguntar o tilt, corre enviarTilt
 
   pinMode(tiltPin, INPUT_PULLUP); // ativa a resistência pull-up interna
+
+  // Interrupção no pino 7: apanha o tilt mesmo que só toque por instantes
+  PCICR |= (1 << PCIE2);
+  PCMSK2 |= (1 << PCINT23);
   pinMode(ledPin, OUTPUT);
 
   analogWrite(contrastePin, CONTRASTE);  // contraste do LCD
@@ -80,6 +87,21 @@ void loop() {
 // Corre sozinha sempre que o Arduino 1 envia uma letra
 void receberDados(int quantos) {
   codigo = Wire.read();
+}
+
+// Corre sozinha sempre que o pino 7 muda; guarda que o tilt abanou
+ISR(PCINT2_vect) {
+  if (digitalRead(tiltPin) == LOW) {
+    tiltDisparou = true;
+  }
+}
+
+// Corre sozinha quando o Arduino 1 pede dados:
+// responde 1 se o tilt está inclinado OU abanou desde a última pergunta, 0 se normal
+void enviarTilt() {
+  byte valor = (tiltDisparou || digitalRead(tiltPin) == LOW) ? 1 : 0;
+  tiltDisparou = false;
+  Wire.write(valor);
 }
 
 // Escreve a mesma mensagem no monitor série e no LCD
