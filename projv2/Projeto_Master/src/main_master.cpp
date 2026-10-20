@@ -28,65 +28,71 @@
 */
 #include <Arduino.h>
 
-#include <SPI.h>
 #include <MFRC522.h>
+#include <SPI.h>
 #include <Servo.h>
 #include <Wire.h>
 
-#define RST_PIN 9         // RC522 RST
-#define SS_PIN 10         // RC522 SDA (SS)
+#define RST_PIN 9 // RC522 RST
+#define SS_PIN 10 // RC522 SDA (SS)
 #define SERVO_PIN 3
-#define BUZZER_PIN 5      // buzzer (SOS)
-#define LED_PIN 4         // LED fica ligado enquanto o SOS toca
-#define INTERVALO_TILT 100  // de quantos em quantos ms pergunta o tilt ao Arduino 2
-#define ENDERECO_LCD 8    // endereço I2C do Arduino 2
+#define BUZZER_PIN 5   // buzzer (SOS)
+#define LED_PIN 4      // LED fica ligado enquanto o SOS toca
+#define ENDERECO_LCD 8 // endereço I2C do Arduino 2
+
+// Tipo de buzzer:
+//   0 = passivo (toca com tone())
+//   1 = ativo, liga com HIGH
+//   2 = ativo/módulo "low trigger", liga com LOW
+#define TIPO_BUZZER 0
 
 Servo myservo;
 MFRC522 rfid(SS_PIN, RST_PIN);
 
 // Cartões autorizados (cada um tem 4 bytes)
-const byte AUTHORIZED_UID[][4] = {
-  {0x17, 0x83, 0xD1, 0x31},
-  {0x37, 0x0C, 0xD0, 0x31}
-};
+const byte AUTHORIZED_UID[][4] = {{0x17, 0x83, 0xD1, 0x31},
+                                  {0x37, 0x0C, 0xD0, 0x31}};
 
 // Quantos cartões há na lista
 const byte NUM_UIDS = sizeof(AUTHORIZED_UID) / sizeof(AUTHORIZED_UID[0]);
 
-bool aberto = false;  // guarda se o cofre está aberto ou fechado
+bool aberto = false; // guarda se o cofre está aberto ou fechado
 
-// ---- SOS sem bloqueio ----
-// Duração de cada passo em ms. Posições pares = buzzer ligado, ímpares = desligado.
-// S (. . .)   O (- - -)   S (. . .)
+// ---- SOS sem bloqueio (o leitor de cartões continua a funcionar) ----
+// Duração de cada passo em ms. Posições pares = buzzer ligado, ímpares =
+// desligado. S (. . .)   O (- - -)   S (. . .)
 const unsigned int PADRAO[] = {
-  200, 200, 200, 200, 200, 600,    // S
-  600, 200, 600, 200, 600, 600,    // O
-  200, 200, 200, 200, 200, 1000    // S + pausa final
+    200, 200, 200, 200, 200, 600, // S
+    600, 200, 600, 200, 600, 600, // O
+    200, 200, 200, 200, 200, 1000 // S + pausa final
 };
 const byte PADRAO_N = sizeof(PADRAO) / sizeof(PADRAO[0]);
 
-bool sosAtivo = false;             // o SOS está a tocar?
-bool sosRepetir = false;           // true = repete até ser parado (alarme de tilt)
-byte passo = 0;                    // passo atual do padrão
-unsigned long inicioPasso = 0;     // quando começou o passo atual
+bool sosAtivo = false;         // o SOS está a tocar?
+byte passo = 0;                // passo atual do padrão
+unsigned long inicioPasso = 0; // quando começou o passo atual
 
 // Protótipos: num .cpp as funções têm de ser declaradas antes de serem usadas.
 bool card_check();
 void enviar(char codigo);
-void sosIniciar(bool repetir);
+bool tiltRemoto();
+void buzzerLigar();
+void buzzerDesligar();
+void aplicarPasso();
+void sosIniciar();
 void sosAtualizar();
 void sosParar();
-void aplicarPasso();
-bool tiltRemoto();
 
 void setup() {
   Serial.begin(9600);
-  while (!Serial);
+  while (!Serial)
+    ;
 
-  Wire.begin();  // sem número = este Arduino é o "mestre" do I2C
+  Wire.begin(); // sem número = este Arduino é o "mestre" do I2C
 
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
+  buzzerDesligar(); // começa em silêncio
 
   SPI.begin();
   rfid.PCD_Init();
@@ -97,39 +103,35 @@ void setup() {
 }
 
 void loop() {
-  // Pergunta ao Arduino 2 se o tilt está inclinado (de 100 em 100 ms)
-  static bool inclinado = false;
+  sosAtualizar(); // faz o SOS avançar (se estiver a tocar)
+
+  // O tilt SÓ é lido quando o SOS não está a tocar
   static unsigned long ultimaLeitura = 0;
-  if (millis() - ultimaLeitura >= INTERVALO_TILT) {
+  if (!sosAtivo && millis() - ultimaLeitura >= 100) {
     ultimaLeitura = millis();
-    inclinado = tiltRemoto();
+
+    if (aberto == false && tiltRemoto()) {
+      Serial.println("Tilt - SOS");
+      sosIniciar();
+    }
   }
 
-  // Cofre fechado e inclinado -> SOS (repete). Se deixar de estar inclinado
-  // ou o cofre abrir, o SOS de tilt pára.
-  if (aberto == false && inclinado) {
-    sosIniciar(true);
-  } else if (sosAtivo && sosRepetir) {
-    sosParar();
-  }
-
-  sosAtualizar();  // faz o SOS avançar sem bloquear o Arduino
-
+  // O leitor de cartões é lido sempre, mesmo com o SOS a tocar
   if (card_check()) {
-    sosParar();  // cartão certo -> pára o SOS imediatamente
+    sosParar(); // cartão certo -> pára o SOS
 
     if (aberto == false) {
       Serial.println("Access granted - a abrir");
       myservo.write(90);
       aberto = true;
-      enviar('A');  // A = aberto
+      enviar('A'); // A = aberto
     } else {
       Serial.println("A fechar");
       myservo.write(0);
       aberto = false;
-      enviar('F');  // F = fechado
+      enviar('F'); // F = fechado
     }
-    delay(1000);  // evita ler o mesmo cartão duas vezes seguidas
+    delay(1000); // evita ler o mesmo cartão duas vezes seguidas
   }
 }
 
@@ -146,56 +148,75 @@ bool tiltRemoto() {
   if (Wire.available()) {
     return Wire.read() == 1;
   }
-  return false;  // sem resposta -> assume normal
+  return false; // sem resposta -> assume normal
 }
 
-// Liga ou desliga o buzzer conforme o passo atual. O LED fica ligado todo o SOS.
+// Liga o buzzer, conforme o TIPO_BUZZER escolhido no topo
+void buzzerLigar() {
+#if TIPO_BUZZER == 0
+  tone(BUZZER_PIN, 1000); // 1000 Hz
+#elif TIPO_BUZZER == 1
+  digitalWrite(BUZZER_PIN, HIGH);
+#else
+  digitalWrite(BUZZER_PIN, LOW);
+#endif
+}
+
+// Desliga o buzzer (silêncio)
+void buzzerDesligar() {
+#if TIPO_BUZZER == 0
+  noTone(BUZZER_PIN);
+#elif TIPO_BUZZER == 1
+  digitalWrite(BUZZER_PIN, LOW);
+#else
+  digitalWrite(BUZZER_PIN, HIGH);
+#endif
+}
+
+// Liga ou desliga o buzzer conforme o passo atual. O LED fica ligado todo o
+// SOS.
 void aplicarPasso() {
   if (passo % 2 == 0) {
-    tone(BUZZER_PIN, 1000);   // 1000 Hz
+    buzzerLigar();
   } else {
-    noTone(BUZZER_PIN);
+    buzzerDesligar();
   }
   digitalWrite(LED_PIN, HIGH);
   inicioPasso = millis();
 }
 
-// Começa o SOS. repetir = true -> repete até ser parado; false -> toca uma vez.
-void sosIniciar(bool repetir) {
-  if (sosAtivo) {
-    if (repetir) sosRepetir = true;
+// Começa um SOS completo (se já estiver a tocar, não faz nada)
+void sosIniciar() {
+  if (sosAtivo)
     return;
-  }
-  Serial.println("SOS");
   sosAtivo = true;
-  sosRepetir = repetir;
   passo = 0;
   aplicarPasso();
 }
 
 // Chamar em todos os loops: passa ao passo seguinte quando o tempo acaba
 void sosAtualizar() {
-  if (!sosAtivo) return;
+  if (!sosAtivo)
+    return;
 
   if (millis() - inicioPasso >= PADRAO[passo]) {
     passo++;
     if (passo >= PADRAO_N) {
-      if (sosRepetir) {
-        passo = 0;       // repete
-      } else {
-        sosParar();      // tocou uma vez, acabou
-        return;
-      }
+      sosParar(); // o SOS completo acabou
+      return;
     }
     aplicarPasso();
   }
 }
 
 void sosParar() {
+  bool estavaAtivo = sosAtivo;
   sosAtivo = false;
-  sosRepetir = false;
-  noTone(BUZZER_PIN);
+  buzzerDesligar();
   digitalWrite(LED_PIN, LOW);
+  if (estavaAtivo) {
+    tiltRemoto(); // deita fora o que o tilt fez enquanto o SOS tocava
+  }
 }
 
 bool card_check() {
@@ -214,7 +235,8 @@ bool card_check() {
   // Compara o cartão lido com cada cartão da lista
   bool match = false;
   for (byte n = 0; n < NUM_UIDS; n++) {
-    if (rfid.uid.size == 4 && memcmp(rfid.uid.uidByte, AUTHORIZED_UID[n], 4) == 0) {
+    if (rfid.uid.size == 4 &&
+        memcmp(rfid.uid.uidByte, AUTHORIZED_UID[n], 4) == 0) {
       match = true;
     }
   }
@@ -224,8 +246,8 @@ bool card_check() {
 
   if (!match) {
     Serial.println("Access denied");
-    enviar('E');         // E = cartão errado
-    sosIniciar(false);   // buzzer faz SOS uma vez
+    enviar('E');  // E = cartão errado
+    sosIniciar(); // buzzer faz SOS (se já estiver a tocar, continua)
   }
   return match;
 }
