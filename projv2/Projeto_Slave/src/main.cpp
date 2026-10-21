@@ -40,6 +40,7 @@ void enviarTilt();
 void mensagem(String linha1, String linha2);
 void mostrarEstado();
 void alarme(String motivo);
+void aviso(String linha1, String linha2);
 
 void setup() {
   Serial.begin(9600);
@@ -75,6 +76,24 @@ void loop() {
       mostrarEstado();
     } else if (c == 'E') {   // E = cartão errado
       alarme("Cartao errado");
+    } else if (c == 'R') {   // R = modo registo, à espera do cartão novo
+      mensagem("Registar cartao", "Passe o cartao");
+    } else if (c == 'N') {   // N = cartão novo adicionado
+      aviso("Cartao", "adicionado!");
+    } else if (c == 'J') {   // J = o cartão já estava na lista
+      aviso("Cartao ja", "estava na lista");
+    } else if (c == 'C') {   // C = lista de cartões cheia
+      aviso("Lista cheia", "Nao adicionado");
+    } else if (c == 'X') {   // X = cartão com UID que não é de 4 bytes
+      aviso("Cartao nao", "suportado");
+    } else if (c == 'D') {   // D = modo remover, à espera do cartão a tirar
+      mensagem("Remover cartao", "Passe o cartao");
+    } else if (c == 'M') {   // M = cartão removido
+      aviso("Cartao", "removido!");
+    } else if (c == 'U') {   // U = o cartão não estava na lista
+      aviso("Cartao nao", "estava na lista");
+    } else if (c == 'L') {   // L = era o último cartão, não foi removido
+      aviso("Ultimo cartao", "Nao removido");
     }
   }
 
@@ -123,6 +142,13 @@ void mostrarEstado() {
   } else {
     mensagem("Cofre trancado", "Passe o cartao");
   }
+}
+
+// Aviso do registo: mostra a mensagem 2 segundos e volta ao estado normal
+void aviso(String linha1, String linha2) {
+  mensagem(linha1, linha2);
+  delay(2000);
+  mostrarEstado();
 }
 
 // Alarme: LED aceso e mensagem de roubo durante 3 segundos
